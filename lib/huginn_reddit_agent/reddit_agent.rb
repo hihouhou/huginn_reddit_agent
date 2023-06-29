@@ -11,6 +11,8 @@ module Agents
 
       `debug` is used for verbose mode.
 
+      `subreddit` is for hottest post (use space to separate subreddits).
+
       `token` is mandatory for auth endpoints.
 
       `type` is for the wanted action like read_unreadmessage.
@@ -60,22 +62,35 @@ module Agents
         'type' => 'read_unreadmessage',
         'debug' => 'false',
         'token' => '',
+        'subreddit' => '',
+        'limit' => '',
         'emit_events' => 'true',
         'expected_receive_period_in_days' => '2',
       }
     end
 
-    form_configurable :type, type: :array, values: ['read_unreadmessage']
+    form_configurable :type, type: :array, values: ['read_unreadmessage', 'hottest_post_subreddit']
     form_configurable :token, type: :string
+    form_configurable :limit, type: :string
+    form_configurable :subreddit, type: :string
     form_configurable :debug, type: :boolean
     form_configurable :emit_events, type: :boolean
     form_configurable :expected_receive_period_in_days, type: :string
     def validate_options
-      errors.add(:base, "type has invalid value: should be 'read_unreadmessage'") if interpolated['type'].present? && !%w(read_unreadmessage).include?(interpolated['type'])
+      errors.add(:base, "type has invalid value: should be 'read_unreadmessage' 'hottest_post_subreddit'") if interpolated['type'].present? && !%w(read_unreadmessage hottest_post_subreddit).include?(interpolated['type'])
 
-      unless options['token'].present? || !['read_unreadmessage'].include?(options['type'])
+      unless options['subreddit'].present? || !['hottest_post_subreddit'].include?(options['type'])
+        errors.add(:base, "subreddit is a required field")
+      end
+
+      unless options['token'].present? || !['read_unreadmessage', 'hottest_post_subreddit'].include?(options['type'])
         errors.add(:base, "token is a required field")
       end
+
+      unless options['limit'].present? || !['hottest_post_subreddit'].include?(options['type'])
+        errors.add(:base, "limit is a required field")
+      end
+
       if options.has_key?('emit_events') && boolify(options['emit_events']).nil?
         errors.add(:base, "if provided, emit_events must be true or false")
       end
@@ -142,6 +157,32 @@ module Agents
 
     end
 
+    def fetch_hottest_post(base_url,subreddit)
+      url = URI("https://www.reddit.com/r/#{subreddit}/hot.json?limit=#{interpolated['limit']}")
+      req = Net::HTTP::Get.new(url)
+      req["User-Agent"] = "huginn/1"
+
+      res = Net::HTTP.start(url.hostname, url.port, use_ssl: true) do |http|
+        http.request(req)
+      end
+
+      log_curl_output(res.code,res.body)
+
+      payload = JSON.parse(res.body)
+      payload['data']['children'].each do |message|
+        create_event payload: message
+      end
+
+    end
+
+    def check_hottest_post_subreddit(base_url)
+      subreddit_list = interpolated['subreddit'].split(" ")
+      subreddit_list.each do |wanted_subreddit|
+        fetch_hottest_post(base_url,wanted_subreddit)
+      end
+
+    end
+
     def check_unreadmessage(base_url)
 
       uri = URI.parse("#{base_url}/message/unread")
@@ -176,6 +217,8 @@ module Agents
       case interpolated['type']
       when "read_unreadmessage"
         check_unreadmessage(base_url)
+      when "hottest_post_subreddit"
+        check_hottest_post_subreddit(base_url)
       else
         log "Error: type has an invalid value (#{interpolated['type']})"
       end
