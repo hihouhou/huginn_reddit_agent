@@ -13,7 +13,13 @@ module Agents
 
       `subreddit` is for hottest post (use space to separate subreddits).
 
-      `token` is mandatory for auth endpoints.
+      `username` is mandatory for auth endpoints.
+
+      `password` is mandatory for auth endpoints.
+
+      `client_id` is mandatory for auth endpoints.
+
+      `secret_key` is mandatory for auth endpoints.
 
       `type` is for the wanted action like read_unreadmessage.
 
@@ -61,7 +67,10 @@ module Agents
       {
         'type' => 'read_unreadmessage',
         'debug' => 'false',
-        'token' => '',
+        'password' => '',
+        'username' => '',
+        'client_id' => '',
+        'secret_key' => '',
         'subreddit' => '',
         'limit' => '',
         'emit_events' => 'true',
@@ -70,7 +79,10 @@ module Agents
     end
 
     form_configurable :type, type: :array, values: ['read_unreadmessage', 'hottest_post_subreddit']
-    form_configurable :token, type: :string
+    form_configurable :username, type: :string
+    form_configurable :password, type: :string
+    form_configurable :client_id, type: :string
+    form_configurable :secret_key, type: :string
     form_configurable :limit, type: :string
     form_configurable :subreddit, type: :string
     form_configurable :debug, type: :boolean
@@ -83,8 +95,20 @@ module Agents
         errors.add(:base, "subreddit is a required field")
       end
 
-      unless options['token'].present? || !['read_unreadmessage', 'hottest_post_subreddit'].include?(options['type'])
-        errors.add(:base, "token is a required field")
+      unless options['password'].present? || !['read_unreadmessage', 'hottest_post_subreddit'].include?(options['type'])
+        errors.add(:base, "password is a required field")
+      end
+
+      unless options['username'].present? || !['read_unreadmessage', 'hottest_post_subreddit'].include?(options['type'])
+        errors.add(:base, "username is a required field")
+      end
+
+      unless options['client_id'].present? || !['read_unreadmessage', 'hottest_post_subreddit'].include?(options['type'])
+        errors.add(:base, "client_id is a required field")
+      end
+
+      unless options['secret_key'].present? || !['read_unreadmessage', 'hottest_post_subreddit'].include?(options['type'])
+        errors.add(:base, "secret_key is a required field")
       end
 
       unless options['limit'].present? || !['hottest_post_subreddit'].include?(options['type'])
@@ -138,6 +162,66 @@ module Agents
 
     end
 
+    def generate_access_token()
+      url = URI('https://ssl.reddit.com/api/v1/access_token')
+      http = Net::HTTP.new(url.host, url.port)
+      http.use_ssl = true
+    
+      request = Net::HTTP::Post.new(url)
+      request.basic_auth(interpolated['client_id'], interpolated['secret_key'])
+      request.set_form_data(
+        'grant_type' => 'password',
+        'username' => interpolated['username'],
+        'password' => interpolated['password']
+      )
+    
+      response = http.request(request)
+      log_curl_output(response.code,response.body)
+    
+      if response.is_a?(Net::HTTPSuccess)
+        data = JSON.parse(response.body)
+        data['timestamp'] = Time.now.to_i
+        memory['access_token'] = data
+      end
+
+      return data['access_token']
+
+    end
+
+    def check_access_token()
+      if !memory['access_token']
+        token = generate_access_token()
+        if interpolated['debug'] == 'true'
+          log "memory['access_token'] not present"
+        end
+      else
+        timestamp = memory['access_token']['timestamp']
+        timestamp_time = Time.at(timestamp)
+        actual_hour = Time.now
+        diff_secondes = actual_hour - timestamp_time
+        diff_hours = diff_secondes / 3600
+          if interpolated['debug'] == 'true'
+            log "diff_hours -> #{diff_hours}"
+            log "timestamp -> #{Time.at(timestamp_time)}"
+            log "actual_hour -> #{Time.at(actual_hour)}"
+          end
+        if diff_hours > 20
+          token = generate_access_token()
+          if interpolated['debug'] == 'true'
+            log "token ttl is > 20h"
+          end
+        else
+          if interpolated['debug'] == 'true'
+            log "token ttl is < 20h"
+          end
+          token = memory['access_token']['access_token'] 
+        end
+      end
+
+      return token
+
+    end
+
     def read_all_messages(base_url)
 
       uri = URI.parse("#{base_url}/api/read_all_messages")
@@ -185,9 +269,10 @@ module Agents
 
     def check_unreadmessage(base_url)
 
+      token = check_access_token()
       uri = URI.parse("#{base_url}/message/unread")
       request = Net::HTTP::Get.new(uri)
-      request["Authorization"] = "Bearer #{interpolated['token']}"
+      request["Authorization"] = "Bearer #{token}"
       request["User-Agent"] = "huginn/1"
 
       req_options = {
