@@ -222,11 +222,11 @@ module Agents
 
     end
 
-    def read_all_messages(base_url)
+    def read_all_messages(base_url,token)
 
       uri = URI.parse("#{base_url}/api/read_all_messages")
       request = Net::HTTP::Post.new(uri)
-      request["Authorization"] = "Bearer #{interpolated['token']}"
+      request["Authorization"] = "Bearer #{token}"
       request["User-Agent"] = "huginn/1"
 
       req_options = {
@@ -292,7 +292,7 @@ module Agents
         end
       end
       if !payload['data']['children'].empty?
-        read_all_messages(base_url)
+        read_all_messages(base_url,token)
       end
     end
 
