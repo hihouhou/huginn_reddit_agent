@@ -17,6 +17,8 @@ module Agents
 
       `password` is mandatory for auth endpoints.
 
+      `bearer_token` is mandatory for authentication (to avoid issue when refresh is needed, continue to use the default value for this field).
+
       `client_id` is mandatory for auth endpoints.
 
       `secret_key` is mandatory for auth endpoints.
@@ -71,6 +73,7 @@ module Agents
         'username' => '',
         'client_id' => '',
         'secret_key' => '',
+        'bearer_token' => '{% credential reddit_bearer_token %}',
         'subreddit' => '',
         'limit' => '',
         'emit_events' => 'true',
@@ -83,6 +86,7 @@ module Agents
     form_configurable :password, type: :string
     form_configurable :client_id, type: :string
     form_configurable :secret_key, type: :string
+    form_configurable :bearer_token, type: :string
     form_configurable :limit, type: :string
     form_configurable :subreddit, type: :string
     form_configurable :debug, type: :boolean
@@ -109,6 +113,10 @@ module Agents
 
       unless options['secret_key'].present? || !['read_unreadmessage', 'hottest_post_subreddit'].include?(options['type'])
         errors.add(:base, "secret_key is a required field")
+      end
+
+      unless options['bearer_token'].present?
+        errors.add(:base, "bearer_token is a required field")
       end
 
       unless options['limit'].present? || !['hottest_post_subreddit'].include?(options['type'])
@@ -151,6 +159,12 @@ module Agents
 
     private
 
+    def set_credential(name, value)
+      c = user.user_credentials.find_or_initialize_by(credential_name: name)
+      c.credential_value = value
+      c.save!
+    end
+
     def log_curl_output(code,body)
 
       log "request status : #{code}"
@@ -162,7 +176,23 @@ module Agents
 
     end
 
-    def generate_access_token()
+    def check_token_validity()
+
+      if memory['expires_at'].nil?
+        token_refresh()
+      else
+        timestamp_to_compare = memory['expires_at']
+        current_timestamp = Time.now.to_i
+        difference_in_hours = (timestamp_to_compare - current_timestamp) / 3600.0
+        if difference_in_hours < 2
+          token_refresh()
+        else
+          log "refresh not needed"
+        end
+      end
+    end
+
+    def token_refresh()
       url = URI('https://ssl.reddit.com/api/v1/access_token')
       http = Net::HTTP.new(url.host, url.port)
       http.use_ssl = true
@@ -179,54 +209,23 @@ module Agents
       log_curl_output(response.code,response.body)
     
       if response.is_a?(Net::HTTPSuccess)
-        data = JSON.parse(response.body)
-        data['timestamp'] = Time.now.to_i
-        memory['access_token'] = data
-      end
-
-      return data['access_token']
-
-    end
-
-    def check_access_token()
-      if !memory['access_token']
-        token = generate_access_token()
-        if interpolated['debug'] == 'true'
-          log "memory['access_token'] not present"
+        payload = JSON.parse(response.body)
+        if interpolated['bearer_token'] != payload['access_token']
+          set_credential("reddit_bearer_token", payload['access_token'])
+          if interpolated['debug'] == 'true'
+            log "reddit_bearer_token credential updated"
+          end
         end
-      else
-        timestamp = memory['access_token']['timestamp']
-        timestamp_time = Time.at(timestamp)
-        actual_hour = Time.now
-        diff_secondes = actual_hour - timestamp_time
-        diff_hours = diff_secondes / 3600
-          if interpolated['debug'] == 'true'
-            log "diff_hours -> #{diff_hours}"
-            log "timestamp -> #{Time.at(timestamp_time)}"
-            log "actual_hour -> #{Time.at(actual_hour)}"
-          end
-        if diff_hours > 20
-          token = generate_access_token()
-          if interpolated['debug'] == 'true'
-            log "token ttl is > 20h"
-          end
-        else
-          if interpolated['debug'] == 'true'
-            log "token ttl is < 20h"
-          end
-          token = memory['access_token']['access_token'] 
-        end
+        memory['expires_at'] = payload['expires_in'] + Time.now.to_i
       end
-
-      return token
-
     end
 
     def read_all_messages(base_url,token)
 
+      check_token_validity()
       uri = URI.parse("#{base_url}/api/read_all_messages")
       request = Net::HTTP::Post.new(uri)
-      request["Authorization"] = "Bearer #{token}"
+      request["Authorization"] = "Bearer #{interpolated['bearer_token']}"
       request["User-Agent"] = "huginn/1"
 
       req_options = {
@@ -269,10 +268,10 @@ module Agents
 
     def check_unreadmessage(base_url)
 
-      token = check_access_token()
+      check_token_validity()
       uri = URI.parse("#{base_url}/message/unread")
       request = Net::HTTP::Get.new(uri)
-      request["Authorization"] = "Bearer #{token}"
+      request["Authorization"] = "Bearer #{interpolated['bearer_token']}"
       request["User-Agent"] = "huginn/1"
 
       req_options = {
