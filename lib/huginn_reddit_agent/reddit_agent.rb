@@ -220,7 +220,7 @@ module Agents
       end
     end
 
-    def read_all_messages(base_url,token)
+    def read_all_messages(base_url)
 
       check_token_validity()
       uri = URI.parse("#{base_url}/api/read_all_messages")
@@ -291,7 +291,7 @@ module Agents
         end
       end
       if !payload['data']['children'].empty?
-        read_all_messages(base_url,token)
+        read_all_messages(base_url)
       end
     end
 
