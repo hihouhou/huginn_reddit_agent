@@ -4,7 +4,7 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 Gem::Specification.new do |spec|
   spec.name          = "huginn_reddit_agent"
-/bin/bash: line 1: q: command not found
+  spec.version       = '0.1.12'
   spec.authors       = ["Nicolas Germain"]
   spec.email         = ["ngermain@hihouhou.com"]
 
