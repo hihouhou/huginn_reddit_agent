@@ -193,7 +193,7 @@ module Agents
     end
 
     def token_refresh()
-      url = URI('https://ssl.reddit.com/api/v1/access_token')
+      url = URI('https://www.reddit.com/api/v1/access_token')
       http = Net::HTTP.new(url.host, url.port)
       http.use_ssl = true
     

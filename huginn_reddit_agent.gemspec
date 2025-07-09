@@ -4,7 +4,7 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 Gem::Specification.new do |spec|
   spec.name          = "huginn_reddit_agent"
-  spec.version       = '0.1.12'
+  spec.version       = '0.1.13'
   spec.authors       = ["Nicolas Germain"]
   spec.email         = ["ngermain@hihouhou.com"]
 
